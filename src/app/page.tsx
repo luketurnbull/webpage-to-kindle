@@ -19,7 +19,11 @@ export default async function Home() {
           <h1 className="text-5xl font-extrabold">Webpage to Kindle</h1>
           <div>
             <p className="text-center text-2xl text-white">
-              {session && <span>Logged in as {session.user?.name}</span>}
+              {session && (
+                <span>
+                  Logged in as {session.user?.name} {session.user?.kindleEmail}
+                </span>
+              )}
             </p>
             <Link
               href={session ? "/api/auth/signout" : "/api/auth/signin"}

@@ -25,10 +25,11 @@ declare module "next-auth" {
     } & DefaultSession["user"];
   }
 
-  // interface User {
-  //   // ...other properties
-  //   // role: UserRole;
-  // }
+  interface User {
+    kindleEmail?: string;
+    // ...other properties
+    // role: UserRole;
+  }
 }
 
 /**
@@ -61,6 +62,7 @@ export const authConfig = {
       user: {
         ...session.user,
         id: user.id,
+        kindleEmail: user.kindleEmail,
       },
     }),
   },
