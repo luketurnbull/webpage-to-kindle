@@ -13,4 +13,10 @@ export const userRouter = createTRPCRouter({
         .where(eq(users.id, ctx.session.user.id));
       return { success: true };
     }),
+  getKindleEmail: protectedProcedure.query(async ({ ctx }) => {
+    const user = await ctx.db.query.users.findFirst({
+      where: eq(users.id, ctx.session.user.id),
+    });
+    return user?.kindleEmail;
+  }),
 });

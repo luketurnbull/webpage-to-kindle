@@ -32,9 +32,9 @@ export function SendToKindle() {
         <button
           type="submit"
           className="rounded-md bg-blue-500 px-4 py-2 hover:bg-blue-600"
-          disabled={sendToKindle.isLoading}
+          disabled={sendToKindle.isPending}
         >
-          {sendToKindle.isLoading ? "Sending..." : "Send to Kindle"}
+          {sendToKindle.isPending ? "Sending..." : "Send to Kindle"}
         </button>
       </form>
     </div>

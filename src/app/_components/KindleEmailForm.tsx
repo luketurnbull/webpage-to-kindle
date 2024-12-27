@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "~/trpc/react";
 
 export function KindleEmailForm() {
-  const [kindleEmail, setKindleEmail] = useState("");
+  const [email, setEmail] = useState("");
   const updateKindleEmail = api.user.updateKindleEmail.useMutation({
     onSuccess: () => {
       // Optionally refresh the page or show success message
@@ -14,7 +14,7 @@ export function KindleEmailForm() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    updateKindleEmail.mutate({ kindleEmail });
+    updateKindleEmail.mutate({ kindleEmail: email });
   };
 
   return (
@@ -23,8 +23,8 @@ export function KindleEmailForm() {
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         <input
           type="email"
-          value={kindleEmail}
-          onChange={(e) => setKindleEmail(e.target.value)}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
           placeholder="your-kindle@kindle.com"
           className="rounded-md px-4 py-2 text-black"
           required
@@ -32,9 +32,9 @@ export function KindleEmailForm() {
         <button
           type="submit"
           className="rounded-md bg-blue-500 px-4 py-2 hover:bg-blue-600"
-          disabled={updateKindleEmail.isLoading}
+          disabled={updateKindleEmail.isPending}
         >
-          {updateKindleEmail.isLoading ? "Saving..." : "Save Kindle Email"}
+          {updateKindleEmail.isPending ? "Saving..." : "Save Kindle Email"}
         </button>
       </form>
     </div>
