@@ -1,16 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "~/trpc/react";
 
 export function SendToKindle() {
   const [url, setUrl] = useState("");
+  const [pdfBlob, setPdfBlob] = useState<string | null>(null);
   const sendToKindle = api.kindle.sendWebpage.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       setUrl("");
-      // Show success message
+      if (data.pdf) {
+        // Convert base64 to blob and create URL
+        const bytes = Uint8Array.from(atob(data.pdf), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const blobUrl = URL.createObjectURL(blob);
+        setPdfBlob(blobUrl);
+      }
     },
   });
+
+  // Clean up blob URL when component unmounts
+  useEffect(() => {
+    return () => {
+      if (pdfBlob) {
+        URL.revokeObjectURL(pdfBlob);
+      }
+    };
+  }, [pdfBlob]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +53,11 @@ export function SendToKindle() {
           {sendToKindle.isPending ? "Sending..." : "Send to Kindle"}
         </button>
       </form>
+      {pdfBlob && (
+        <a href={pdfBlob} target="_blank" rel="noopener noreferrer">
+          View PDF
+        </a>
+      )}
     </div>
   );
 }

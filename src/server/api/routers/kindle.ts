@@ -11,7 +11,6 @@ export const kindleRouter = createTRPCRouter({
     .input(z.object({ url: z.string().url() }))
     .mutation(async ({ ctx, input }) => {
       try {
-        // Check if user has set their Kindle email
         if (!ctx.session.user.kindleEmail) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -19,29 +18,16 @@ export const kindleRouter = createTRPCRouter({
           });
         }
 
-        if (!ctx.session.user || !ctx.session.sessionToken) {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "Failed to get Gmail access token",
-          });
-        }
-
-        const sessionToken = ctx.session.sessionToken;
         const kindleEmail = ctx.session.user.kindleEmail;
-
-        console.log(`session token`, sessionToken);
-        console.log(`kindle email`, kindleEmail);
-
-        const browser = await puppeteer.launch();
-        const page = await browser.newPage();
-
         const fileName = `${input.url.split("/").pop() ?? "article"}.pdf`;
 
-        console.log("fileName", fileName);
-
+        // Open a browser and navigate to the URL
+        const browser = await puppeteer.launch();
+        const page = await browser.newPage();
         await page.goto(input.url, { waitUntil: "networkidle2" });
+
+        // Convert the page to a PDF
         const pdf = await page.pdf({ format: "A4" });
-        console.log("pdf", pdf);
         await browser.close();
 
         const auth = new google.auth.OAuth2(
@@ -50,7 +36,6 @@ export const kindleRouter = createTRPCRouter({
           process.env.NEXTAUTH_URL,
         );
 
-        // Get the user's OAuth access token
         const account = await ctx.db.query.accounts.findFirst({
           where: eq(accounts.userId, ctx.session.user.id),
         });
@@ -72,20 +57,27 @@ export const kindleRouter = createTRPCRouter({
           version: "v1",
         });
 
+        // Convert PDF buffer directly to base64 string
+        const pdfBase64 = Buffer.from(pdf).toString("base64");
+
+        // Create email with base64 PDF attachment
         const raw = Buffer.from(
           [
             `From: ${ctx.session.user.email}`,
             `To: ${kindleEmail}`,
             'Content-Type: multipart/mixed; boundary="boundary"',
-            "MIME-Version: 1.0",
-            "Subject: Web Article",
             "",
             "--boundary",
-            "Content-Type: application/pdf",
+            "Content-Type: text/plain",
+            "",
+            "Sent from Send to Kindle",
+            "",
+            "--boundary",
+            `Content-Type: application/pdf; name="${fileName}"`,
             "Content-Transfer-Encoding: base64",
             `Content-Disposition: attachment; filename="${fileName}"`,
             "",
-            pdf.toString(),
+            pdfBase64,
             "--boundary--",
           ].join("\n"),
         )
@@ -101,9 +93,19 @@ export const kindleRouter = createTRPCRouter({
           },
         });
 
-        console.log("res", res);
+        if (res.status !== 200) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to send email",
+            cause: res.data,
+          });
+        }
 
-        return { success: true };
+        return {
+          success: true,
+          body: res.data,
+          pdf: pdfBase64,
+        };
       } catch (error) {
         console.error(error);
         throw new TRPCError({
