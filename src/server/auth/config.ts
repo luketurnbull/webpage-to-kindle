@@ -46,7 +46,6 @@ export const authConfig = {
     verificationTokensTable: verificationTokens,
   }),
   callbacks: {
-    // @ts-expect-error-ignore
     session: ({ session, user }) => ({
       ...session,
       user: {
