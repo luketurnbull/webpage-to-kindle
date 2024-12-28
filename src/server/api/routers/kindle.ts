@@ -193,7 +193,41 @@ const formatFileNameSafe = (title: string): string => {
 };
 
 const extractAndStyleContent = async (page: Page) => {
+  // First handle images and wait for them to load
   await page.evaluate(() => {
+    const images = document.querySelectorAll("img");
+    images.forEach((img) => {
+      if (img.loading === "lazy") {
+        img.loading = "eager";
+      }
+      // Handle common data-src patterns
+      const dataSrc =
+        img.getAttribute("data-src") ??
+        img.getAttribute("data-original") ??
+        img.getAttribute("data-lazy-src");
+      if (dataSrc) {
+        img.src = dataSrc;
+      }
+    });
+  });
+
+  // Wait for all images to load
+  await page.evaluate(() => {
+    return Promise.all(
+      Array.from(document.images)
+        .filter((img) => !img.complete)
+        .map(
+          (img) =>
+            new Promise((resolve, reject) => {
+              img.addEventListener("load", resolve);
+              img.addEventListener("error", resolve); // Resolve on error too to avoid hanging
+            }),
+        ),
+    );
+  });
+
+  // Now extract and style content
+  await page.evaluate((contentStyling) => {
     // Define elements to remove
     const elementsToRemove = ["header", "nav", "footer", "aside", "form"];
 
@@ -210,19 +244,10 @@ const extractAndStyleContent = async (page: Page) => {
       }
     });
 
-    // Handle lazy-loaded images before extracting content
-    const images = document.querySelectorAll("img");
-    images.forEach((img) => {
-      if (img.loading === "lazy") {
-        img.loading = "eager";
-      }
-      // Handle common data-src patterns
-      const dataSrc =
-        img.getAttribute("data-src") ||
-        img.getAttribute("data-original") ||
-        img.getAttribute("data-lazy-src");
-      if (dataSrc) {
-        img.src = dataSrc;
+    // Remove all standalone links (not inside paragraphs)
+    document.querySelectorAll("a").forEach((link) => {
+      if (link.parentElement?.tagName.toLowerCase() !== "p") {
+        link.replaceWith(...link.childNodes);
       }
     });
 
@@ -230,9 +255,9 @@ const extractAndStyleContent = async (page: Page) => {
     const articleContainer = document.createElement("article");
     articleContainer.id = "kindle-content";
 
-    // Select all relevant content elements
+    // Select all relevant content elements, excluding standalone links
     const contentElements = document.querySelectorAll(
-      "h1, h2, h3, h4, h5, h6, p, strong, em, i, b, a, img, ul, ol, li, blockquote, code, pre",
+      "h1, h2, h3, h4, h5, h6, p, strong, em, i, b, img, ul, ol, li, blockquote, code, pre",
     );
 
     // Clone and append each element to our new container
@@ -255,10 +280,10 @@ const extractAndStyleContent = async (page: Page) => {
     const style = document.createElement("style");
     style.textContent = contentStyling;
     document.head.appendChild(style);
-  });
+  }, contentStyling); // Pass contentStyling as an argument
 
-  // Add a longer delay to ensure images are loaded
-  await new Promise((resolve) => setTimeout(resolve, 3000));
+  // Add a small delay for safety
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 };
 
 export const kindleRouter = createTRPCRouter({
@@ -345,13 +370,13 @@ export const kindleRouter = createTRPCRouter({
           format: "A4",
           printBackground: false,
           margin: {
-            top: "20px",
-            right: "20px",
-            bottom: "20px",
-            left: "20px",
+            top: 200,
+            right: 0,
+            bottom: 200,
+            left: 0,
           },
           displayHeaderFooter: false,
-          preferCSSPageSize: true,
+          preferCSSPageSize: false,
         });
 
         await browser.close();
