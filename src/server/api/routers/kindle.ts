@@ -16,7 +16,7 @@ const contentStyling = /* css */ `
         line-height: 1.75;
         max-width: 65ch;
         margin: 0 auto;
-        padding: 2rem;
+        padding: 4rem 2rem;
         background: white;
         color: rgb(55, 65, 81);
       }
@@ -132,6 +132,24 @@ const contentStyling = /* css */ `
         border-radius: 0.375rem;
       }
 
+      pre ul, pre ol {
+        margin: 0;
+        padding: 0;
+      }
+
+      pre li {
+        margin: 0;
+        padding: 0;
+      }
+
+      pre ul > li {
+        list-style: none;
+      }
+
+      pre ol > li {
+        list-style: none;
+      }
+
       pre code {
         background-color: transparent;
         border-width: 0;
@@ -218,7 +236,7 @@ const extractAndStyleContent = async (page: Page) => {
         .filter((img) => !img.complete)
         .map(
           (img) =>
-            new Promise((resolve, reject) => {
+            new Promise((resolve, _) => {
               img.addEventListener("load", resolve);
               img.addEventListener("error", resolve); // Resolve on error too to avoid hanging
             }),
@@ -228,62 +246,76 @@ const extractAndStyleContent = async (page: Page) => {
 
   // Now extract and style content
   await page.evaluate((contentStyling) => {
-    // Define elements to remove
-    const elementsToRemove = ["header", "nav", "footer", "aside", "form"];
+    return new Promise((resolve) => {
+      // Define helper function for stripping attributes
+      const stripAttributes = (el: HTMLElement) => {
+        el.removeAttribute("class");
+        el.removeAttribute("style");
+        el.removeAttribute("id");
+        el.querySelectorAll("*").forEach((child) => {
+          if (child instanceof HTMLElement) {
+            child.removeAttribute("class");
+            child.removeAttribute("style");
+            child.removeAttribute("id");
+          }
+        });
+      };
 
-    // First remove navigation and fixed/sticky elements
-    const allElements = document.querySelectorAll("*");
-    allElements.forEach((element) => {
-      const style = window.getComputedStyle(element);
-      const elementName = element.tagName.toLowerCase();
-      const isElementToRemove = elementsToRemove.includes(elementName);
-      const isFixedOrSticky =
-        style.position === "fixed" || style.position === "sticky";
-      if (isElementToRemove || isFixedOrSticky) {
-        element.remove();
-      }
+      // Define elements to remove
+      const elementsToRemove = ["header", "nav", "footer", "aside", "form"];
+
+      // First remove navigation and fixed/sticky elements
+      const allElements = document.querySelectorAll("*");
+      allElements.forEach((element) => {
+        const style = window.getComputedStyle(element);
+        const elementName = element.tagName.toLowerCase();
+        const isElementToRemove = elementsToRemove.includes(elementName);
+        const isFixedOrSticky =
+          style.position === "fixed" || style.position === "sticky";
+        if (isElementToRemove || isFixedOrSticky) {
+          element.remove();
+        }
+      });
+
+      // Remove all standalone links (not inside paragraphs)
+      document.querySelectorAll("a").forEach((link) => {
+        if (link.parentElement?.tagName.toLowerCase() !== "p") {
+          link.replaceWith(...link.childNodes);
+        }
+      });
+
+      // Create a new container for our extracted content
+      const articleContainer = document.createElement("article");
+      articleContainer.id = "kindle-content";
+
+      // Select all relevant content elements, excluding nested elements
+      const contentElements = document.querySelectorAll(
+        `h1, h2, h3, h4, h5, h6, p, img, blockquote,
+         code:not(p code):not(pre code), 
+         ul:not(pre ul):not(pre *), 
+         ol:not(pre ol):not(pre *),
+         pre`,
+      );
+
+      // Clone and append each element to our new container
+      contentElements.forEach((element) => {
+        const clone = element.cloneNode(true) as HTMLElement;
+        stripAttributes(clone);
+        articleContainer.appendChild(clone);
+      });
+
+      // Clear the body and append our new container
+      document.body.innerHTML = "";
+      document.body.appendChild(articleContainer);
+
+      // Add our custom styling
+      const style = document.createElement("style");
+      style.textContent = contentStyling;
+      document.head.appendChild(style);
+
+      resolve(void 0);
     });
-
-    // Remove all standalone links (not inside paragraphs)
-    document.querySelectorAll("a").forEach((link) => {
-      if (link.parentElement?.tagName.toLowerCase() !== "p") {
-        link.replaceWith(...link.childNodes);
-      }
-    });
-
-    // Create a new container for our extracted content
-    const articleContainer = document.createElement("article");
-    articleContainer.id = "kindle-content";
-
-    // Select all relevant content elements, excluding standalone links
-    const contentElements = document.querySelectorAll(
-      "h1, h2, h3, h4, h5, h6, p, strong, em, i, b, img, ul, ol, li, blockquote, code, pre",
-    );
-
-    // Clone and append each element to our new container
-    contentElements.forEach((element) => {
-      const clone = element.cloneNode(true) as HTMLElement;
-
-      // Strip all existing styles and classes
-      clone.removeAttribute("class");
-      clone.removeAttribute("style");
-      clone.removeAttribute("id");
-
-      articleContainer.appendChild(clone);
-    });
-
-    // Clear the body and append our new container
-    document.body.innerHTML = "";
-    document.body.appendChild(articleContainer);
-
-    // Add our custom styling
-    const style = document.createElement("style");
-    style.textContent = contentStyling;
-    document.head.appendChild(style);
-  }, contentStyling); // Pass contentStyling as an argument
-
-  // Add a small delay for safety
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  }, contentStyling);
 };
 
 export const kindleRouter = createTRPCRouter({
@@ -348,9 +380,6 @@ export const kindleRouter = createTRPCRouter({
         // Replace the removeUnwantedElements call with our new function
         await extractAndStyleContent(page);
 
-        // Add a small delay to ensure images are loaded
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
         // Wait for content to load
         await page.waitForFunction(
           () => {
@@ -368,15 +397,15 @@ export const kindleRouter = createTRPCRouter({
         // Convert to PDF with full content
         const pdf = await page.pdf({
           format: "A4",
-          printBackground: false,
           margin: {
-            top: 200,
+            top: 100,
             right: 0,
-            bottom: 200,
+            bottom: 100,
             left: 0,
           },
+          printBackground: false,
           displayHeaderFooter: false,
-          preferCSSPageSize: false,
+          preferCSSPageSize: true,
         });
 
         await browser.close();
