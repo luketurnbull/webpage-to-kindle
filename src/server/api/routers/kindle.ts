@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { google } from "googleapis";
-import puppeteer, { Browser, type Page } from "puppeteer";
+import puppeteer, { type Browser, type Page } from "puppeteer";
 import { TRPCError } from "@trpc/server";
 import { accounts } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
@@ -371,10 +371,9 @@ export const kindleRouter = createTRPCRouter({
         console.log(`
           ------------------------------
           Sending ${url} to ${kindleEmail} as a PDF
+          Launching browser...
           ------------------------------
         `);
-
-        console.log("Launching browser...");
 
         const browser = await puppeteer.launch({
           headless: true,
@@ -390,46 +389,50 @@ export const kindleRouter = createTRPCRouter({
           ],
         });
 
-        console.log("Browser launched");
-        console.log("Opening page...");
+        console.log(`
+          ------------------------------
+          Browser launched.
+          Opening ${url} in browser...
+          ------------------------------
+        `);
 
-        // Open page
         const page = await createPage(browser, url);
 
-        console.log("Page opened");
-        console.log("Waiting for images to load...");
+        console.log(`
+          ------------------------------
+          Page ${url} opened.
+          Waiting for images to load...
+          ------------------------------
+        `);
 
-        // Wait for images to load
         await waitForImagesToLoad(page);
 
-        console.log("Images loaded");
-        console.log("Extracting and styling content...");
+        console.log(`
+          ------------------------------
+          Images loaded.
+          Extracting and styling content...
+          ------------------------------
+        `);
 
-        // Replace the removeUnwantedElements call with our new function
         await extractAndStyleContent(page);
 
-        console.log("Content extracted and styled");
+        console.log(`
+          ------------------------------
+          Content extracted and styled.
+          Getting page title and creating safe file name...
+          ------------------------------
+        `);
 
-        // // Wait for content to load
-        // await page.waitForFunction(
-        //   () => {
-        //     const body = document.body;
-        //     const content = body.textContent ?? "";
-        //     return content.length > 500;
-        //   },
-        //   { timeout: 10000 },
-        // );
-
-        console.log("Getting page title and creating safe file name...");
-
-        // After page.goto and before PDF generation
         const pageTitle = await getPageTitle(page);
         const safeFileName = `${formatFileNameSafe(pageTitle)}.pdf`;
 
-        console.log("Page title and safe file name created");
-        console.log("Converting to PDF...");
+        console.log(`
+          ------------------------------
+          Page title and safe file name created.
+          Converting to PDF...
+          ------------------------------
+        `);
 
-        // Convert to PDF with full content
         const pdf = await page.pdf({
           format: "A4",
           margin: {
@@ -443,19 +446,34 @@ export const kindleRouter = createTRPCRouter({
           preferCSSPageSize: true,
         });
 
-        console.log("PDF created");
-        console.log("Closing browser...");
+        console.log(`
+          ------------------------------
+          PDF created.
+          Closing browser...
+          ------------------------------
+        `);
 
         await browser.close();
 
-        console.log("Browser closed");
-        console.log("Sending email...");
+        console.log(`
+          ------------------------------
+          Browser closed.
+          Getting Gmail access token...
+          ------------------------------
+        `);
 
         const auth = new google.auth.OAuth2(
           process.env.GOOGLE_CLIENT_ID,
           process.env.GOOGLE_CLIENT_SECRET,
           process.env.NEXTAUTH_URL,
         );
+
+        console.log(`
+          ------------------------------
+          Gmail access token obtained.
+          Getting account...
+          ------------------------------
+        `);
 
         const account = await ctx.db.query.accounts.findFirst({
           where: eq(accounts.userId, ctx.session.user.id),
@@ -468,20 +486,46 @@ export const kindleRouter = createTRPCRouter({
           });
         }
 
+        console.log(`
+          ------------------------------
+          Account found.
+          Setting credentials...
+          ------------------------------
+        `);
+
         auth.setCredentials({
           access_token: account.access_token,
           refresh_token: account.refresh_token,
         });
+
+        console.log(`
+          ------------------------------
+          Credentials set.
+          Creating Gmail client...
+          ------------------------------
+        `);
 
         const gmail = google.gmail({
           auth: auth,
           version: "v1",
         });
 
-        // Convert PDF buffer directly to base64 string
+        console.log(`
+          ------------------------------
+          Gmail client created.
+          Converting PDF buffer to base64 string...
+          ------------------------------
+        `);
+
         const pdfBase64 = Buffer.from(pdf).toString("base64");
 
-        // Create email with base64 PDF attachment
+        console.log(`
+          ------------------------------
+          PDF buffer converted to base64 string.
+          Creating and sending email with base64 PDF attachment...
+          ------------------------------
+        `);
+
         const raw = Buffer.from(
           [
             `From: ${ctx.session.user.email}`,
@@ -514,6 +558,13 @@ export const kindleRouter = createTRPCRouter({
             raw: raw,
           },
         });
+
+        console.log(`
+          ------------------------------
+          Email sent.
+          Returning response...
+          ------------------------------
+        `);
 
         if (res.status !== 200) {
           throw new TRPCError({
