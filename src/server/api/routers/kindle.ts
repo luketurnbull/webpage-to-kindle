@@ -5,6 +5,8 @@ import puppeteer, { type Browser, type Page } from "puppeteer";
 import { TRPCError } from "@trpc/server";
 import { accounts } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
+import { type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type * as schema from "~/server/db/schema";
 
 const urlsToRedirect = ["medium.com", "javascript.plainenglish.io"];
 const kindleHelperUrl = process.env.KINDLE_HELPER_URL;
@@ -353,6 +355,118 @@ const extractAndStyleContent = async (page: Page) => {
   }, contentStyling);
 };
 
+const setupGmailAuth = async (
+  userId: string,
+  db: PostgresJsDatabase<typeof schema>,
+) => {
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.NEXTAUTH_URL,
+  );
+
+  const account = await db.query.accounts.findFirst({
+    where: eq(accounts.userId, userId),
+  });
+
+  if (!account?.access_token) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "No Gmail access token found",
+    });
+  }
+
+  auth.setCredentials({
+    access_token: account.access_token,
+    refresh_token: account.refresh_token,
+  });
+
+  const gmail = google.gmail({
+    auth: auth,
+    version: "v1",
+  });
+
+  return gmail;
+};
+
+const scrapePage = async (url: string) => {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-infobars",
+      "--window-position=0,0",
+      "--ignore-certifcate-errors",
+      "--ignore-certifcate-errors-spki-list",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-web-security",
+    ],
+  });
+
+  try {
+    const page = await createPage(browser, url);
+    await waitForImagesToLoad(page);
+    await extractAndStyleContent(page);
+
+    const pageTitle = await getPageTitle(page);
+    const safeFileName = `${formatFileNameSafe(pageTitle)}.pdf`;
+
+    const pdf = await page.pdf({
+      format: "A4",
+      margin: {
+        top: 100,
+        right: 0,
+        bottom: 100,
+        left: 0,
+      },
+      printBackground: false,
+      displayHeaderFooter: false,
+      preferCSSPageSize: true,
+    });
+
+    return { pdf, pageTitle, safeFileName };
+  } finally {
+    await browser.close();
+  }
+};
+
+const constructEmailBody = (
+  pageTitle: string,
+  pdfBase64: string,
+  safeFileName: string,
+  kindleEmail: string,
+  userEmail: string,
+) => {
+  const raw = Buffer.from(
+    [
+      `From: ${userEmail}`,
+      `To: ${kindleEmail}`,
+      `Subject: ${pageTitle}`,
+      'Content-Type: multipart/mixed; boundary="boundary"',
+      "",
+      "--boundary",
+      "Content-Type: text/plain",
+      "",
+      "Sent from Send to Kindle",
+      "",
+      "--boundary",
+      `Content-Type: application/pdf; name="${safeFileName}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${safeFileName}"`,
+      "",
+      pdfBase64,
+      "--boundary--",
+    ].join("\n"),
+  )
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  return raw;
+};
+
 export const kindleRouter = createTRPCRouter({
   sendWebpage: protectedProcedure
     .input(z.object({ url: z.string().url() }))
@@ -365,192 +479,31 @@ export const kindleRouter = createTRPCRouter({
           });
         }
 
-        const url = constructUrl(input.url);
-        const kindleEmail = ctx.session.user.kindleEmail;
-
-        console.log(`
-          ------------------------------
-          Sending ${url} to ${kindleEmail} as a PDF
-          Launching browser...
-          ------------------------------
-        `);
-
-        const browser = await puppeteer.launch({
-          headless: true,
-          args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-infobars",
-            "--window-position=0,0",
-            "--ignore-certifcate-errors",
-            "--ignore-certifcate-errors-spki-list",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-web-security",
-          ],
-        });
-
-        console.log(`
-          ------------------------------
-          Browser launched.
-          Opening ${url} in browser...
-          ------------------------------
-        `);
-
-        const page = await createPage(browser, url);
-
-        console.log(`
-          ------------------------------
-          Page ${url} opened.
-          Waiting for images to load...
-          ------------------------------
-        `);
-
-        await waitForImagesToLoad(page);
-
-        console.log(`
-          ------------------------------
-          Images loaded.
-          Extracting and styling content...
-          ------------------------------
-        `);
-
-        await extractAndStyleContent(page);
-
-        console.log(`
-          ------------------------------
-          Content extracted and styled.
-          Getting page title and creating safe file name...
-          ------------------------------
-        `);
-
-        const pageTitle = await getPageTitle(page);
-        const safeFileName = `${formatFileNameSafe(pageTitle)}.pdf`;
-
-        console.log(`
-          ------------------------------
-          Page title and safe file name created.
-          Converting to PDF...
-          ------------------------------
-        `);
-
-        const pdf = await page.pdf({
-          format: "A4",
-          margin: {
-            top: 100,
-            right: 0,
-            bottom: 100,
-            left: 0,
-          },
-          printBackground: false,
-          displayHeaderFooter: false,
-          preferCSSPageSize: true,
-        });
-
-        console.log(`
-          ------------------------------
-          PDF created.
-          Closing browser...
-          ------------------------------
-        `);
-
-        await browser.close();
-
-        console.log(`
-          ------------------------------
-          Browser closed.
-          Getting Gmail access token...
-          ------------------------------
-        `);
-
-        const auth = new google.auth.OAuth2(
-          process.env.GOOGLE_CLIENT_ID,
-          process.env.GOOGLE_CLIENT_SECRET,
-          process.env.NEXTAUTH_URL,
-        );
-
-        console.log(`
-          ------------------------------
-          Gmail access token obtained.
-          Getting account...
-          ------------------------------
-        `);
-
-        const account = await ctx.db.query.accounts.findFirst({
-          where: eq(accounts.userId, ctx.session.user.id),
-        });
-
-        if (!account?.access_token) {
+        if (!ctx.session.user.email) {
           throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "No Gmail access token found",
+            code: "BAD_REQUEST",
+            message: "Please set your email first",
           });
         }
 
-        console.log(`
-          ------------------------------
-          Account found.
-          Setting credentials...
-          ------------------------------
-        `);
+        const url = constructUrl(input.url);
+        const { kindleEmail, email: userEmail } = ctx.session.user;
 
-        auth.setCredentials({
-          access_token: account.access_token,
-          refresh_token: account.refresh_token,
-        });
-
-        console.log(`
-          ------------------------------
-          Credentials set.
-          Creating Gmail client...
-          ------------------------------
-        `);
-
-        const gmail = google.gmail({
-          auth: auth,
-          version: "v1",
-        });
-
-        console.log(`
-          ------------------------------
-          Gmail client created.
-          Converting PDF buffer to base64 string...
-          ------------------------------
-        `);
+        // Run both operations in parallel
+        const [gmail, { pdf, pageTitle, safeFileName }] = await Promise.all([
+          setupGmailAuth(ctx.session.user.id, ctx.db),
+          scrapePage(url),
+        ]);
 
         const pdfBase64 = Buffer.from(pdf).toString("base64");
 
-        console.log(`
-          ------------------------------
-          PDF buffer converted to base64 string.
-          Creating and sending email with base64 PDF attachment...
-          ------------------------------
-        `);
-
-        const raw = Buffer.from(
-          [
-            `From: ${ctx.session.user.email}`,
-            `To: ${kindleEmail}`,
-            `Subject: ${pageTitle}`,
-            'Content-Type: multipart/mixed; boundary="boundary"',
-            "",
-            "--boundary",
-            "Content-Type: text/plain",
-            "",
-            "Sent from Send to Kindle",
-            "",
-            "--boundary",
-            `Content-Type: application/pdf; name="${safeFileName}"`,
-            "Content-Transfer-Encoding: base64",
-            `Content-Disposition: attachment; filename="${safeFileName}"`,
-            "",
-            pdfBase64,
-            "--boundary--",
-          ].join("\n"),
-        )
-          .toString("base64")
-          .replace(/\+/g, "-")
-          .replace(/\//g, "_")
-          .replace(/=+$/, "");
+        const raw = constructEmailBody(
+          pageTitle,
+          pdfBase64,
+          safeFileName,
+          kindleEmail,
+          userEmail,
+        );
 
         const res = await gmail.users.messages.send({
           userId: "me",
@@ -558,13 +511,6 @@ export const kindleRouter = createTRPCRouter({
             raw: raw,
           },
         });
-
-        console.log(`
-          ------------------------------
-          Email sent.
-          Returning response...
-          ------------------------------
-        `);
 
         if (res.status !== 200) {
           throw new TRPCError({
