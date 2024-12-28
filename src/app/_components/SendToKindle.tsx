@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { api } from "~/trpc/react";
-
+import { Button } from "~/components/ui/button";
 export function SendToKindle() {
   const [url, setUrl] = useState("");
   const [pdfBlob, setPdfBlob] = useState<string | null>(null);
@@ -45,13 +45,9 @@ export function SendToKindle() {
           className="rounded-md px-4 py-2 text-black"
           required
         />
-        <button
-          type="submit"
-          className="rounded-md bg-blue-500 px-4 py-2 hover:bg-blue-600"
-          disabled={sendToKindle.isPending}
-        >
+        <Button type="submit" disabled={sendToKindle.isPending}>
           {sendToKindle.isPending ? "Sending..." : "Send to Kindle"}
-        </button>
+        </Button>
       </form>
       {pdfBlob && (
         <a href={pdfBlob} target="_blank" rel="noopener noreferrer">

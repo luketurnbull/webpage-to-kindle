@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "~/components/ui/button";
 import { api } from "~/trpc/react";
 
 export function KindleEmailForm() {
@@ -29,13 +30,9 @@ export function KindleEmailForm() {
           className="rounded-md px-4 py-2 text-black"
           required
         />
-        <button
-          type="submit"
-          className="rounded-md bg-blue-500 px-4 py-2 hover:bg-blue-600"
-          disabled={updateKindleEmail.isPending}
-        >
+        <Button type="submit" disabled={updateKindleEmail.isPending}>
           {updateKindleEmail.isPending ? "Saving..." : "Save Kindle Email"}
-        </button>
+        </Button>
       </form>
     </div>
   );

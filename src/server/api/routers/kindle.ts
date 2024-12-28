@@ -18,6 +18,10 @@ export const kindleRouter = createTRPCRouter({
           });
         }
 
+        const url = input.url.includes("medium.com")
+          ? `https://freedium.cfd/${input.url}`
+          : input.url;
+
         const kindleEmail = ctx.session.user.kindleEmail;
         const fileName = `${input.url.split("/").pop() ?? "article"}.pdf`;
 
@@ -37,16 +41,6 @@ export const kindleRouter = createTRPCRouter({
         });
 
         const page = await browser.newPage();
-
-        // Mask webdriver
-        await page.evaluateOnNewDocument(() => {
-          // @ts-expect-error webdriver is not a property of navigator
-          delete navigator.__proto__.webdriver;
-          // @ts-expect-error chrome is not a property of window
-          window.chrome = {};
-          // @ts-expect-error chrome is not a property of navigator
-          window.navigator.chrome = {};
-        });
 
         // Set a realistic viewport
         await page.setViewport({
@@ -70,7 +64,7 @@ export const kindleRouter = createTRPCRouter({
         });
 
         // Navigate with extended timeout and wait conditions
-        await page.goto(input.url, {
+        await page.goto(url, {
           waitUntil: "networkidle0",
           timeout: 30000,
         });
