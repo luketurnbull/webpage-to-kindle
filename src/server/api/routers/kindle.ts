@@ -218,8 +218,8 @@ const extractAndStyleContent = async (page: Page) => {
       }
       // Handle common data-src patterns
       const dataSrc =
-        img.getAttribute("data-src") ??
-        img.getAttribute("data-original") ??
+        img.getAttribute("data-src") ||
+        img.getAttribute("data-original") ||
         img.getAttribute("data-lazy-src");
       if (dataSrc) {
         img.src = dataSrc;
@@ -258,7 +258,7 @@ const extractAndStyleContent = async (page: Page) => {
   });
 
   // Add a longer delay to ensure images are loaded
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await new Promise((resolve) => setTimeout(resolve, 3000));
 };
 
 export const kindleRouter = createTRPCRouter({
