@@ -1,10 +1,44 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { google } from "googleapis";
-import puppeteer from "puppeteer";
+import puppeteer, { type Page } from "puppeteer";
 import { TRPCError } from "@trpc/server";
 import { accounts } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
+
+const urlsToRedirect = ["medium.com", "javascript.plainenglish.io"];
+
+const constructUrl = (url: string) => {
+  for (const redirectUrl of urlsToRedirect) {
+    if (url.includes(redirectUrl)) {
+      return `https://freedium.cfd/${url}`;
+    }
+  }
+  return url;
+};
+
+const getPageTitle = async (page: Page): Promise<string> => {
+  const title = await page.evaluate(() => {
+    // Try to get title from h1 first
+    const h1 = document.querySelector("h1");
+    if (h1?.textContent) return h1.textContent.trim();
+
+    // Fallback to document title
+    if (document.title) return document.title.trim();
+
+    // Final fallback to URL
+    return window.location.pathname.split("/").pop() ?? "article";
+  });
+  return title;
+};
+
+const formatFileNameSafe = (title: string): string => {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-") // Replace special chars with hyphen
+    .replace(/^-+|-+$/g, "") // Remove leading/trailing hyphens
+    .substring(0, 100); // Limit length
+};
 
 export const kindleRouter = createTRPCRouter({
   sendWebpage: protectedProcedure
@@ -18,12 +52,8 @@ export const kindleRouter = createTRPCRouter({
           });
         }
 
-        const url = input.url.includes("medium.com")
-          ? `https://freedium.cfd/${input.url}`
-          : input.url;
-
+        const url = constructUrl(input.url);
         const kindleEmail = ctx.session.user.kindleEmail;
-        const fileName = `${input.url.split("/").pop() ?? "article"}.pdf`;
 
         // Launch browser with stealth mode and additional configurations
         const browser = await puppeteer.launch({
@@ -94,11 +124,14 @@ export const kindleRouter = createTRPCRouter({
               margin: 0 !important;
               max-width: 100% !important;
               position: relative !important; /* Prevent fixed positioning */
+              color: black !important;
             }
             article {
               max-width: 100% !important;
               margin: 0 !important;
               padding: 0 !important;
+              color: black !important;
+              background-color: white !important;
             }
             .main-content {
               margin: 0 !important;
@@ -122,6 +155,10 @@ export const kindleRouter = createTRPCRouter({
           },
           { timeout: 10000 },
         );
+
+        // After page.goto and before PDF generation
+        const pageTitle = await getPageTitle(page);
+        const safeFileName = `${formatFileNameSafe(pageTitle)}.pdf`;
 
         // Convert to PDF with full content
         const pdf = await page.pdf({
@@ -175,6 +212,7 @@ export const kindleRouter = createTRPCRouter({
             `From: ${ctx.session.user.email}`,
             `To: ${kindleEmail}`,
             'Content-Type: multipart/mixed; boundary="boundary"',
+            `X-Doc-Title: ${pageTitle}`,
             "",
             "--boundary",
             "Content-Type: text/plain",
@@ -182,9 +220,9 @@ export const kindleRouter = createTRPCRouter({
             "Sent from Send to Kindle",
             "",
             "--boundary",
-            `Content-Type: application/pdf; name="${fileName}"`,
+            `Content-Type: application/pdf; name="${safeFileName}"`,
             "Content-Transfer-Encoding: base64",
-            `Content-Disposition: attachment; filename="${fileName}"`,
+            `Content-Disposition: attachment; filename="${safeFileName}"`,
             "",
             pdfBase64,
             "--boundary--",
