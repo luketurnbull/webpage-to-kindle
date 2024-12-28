@@ -7,11 +7,163 @@ import { accounts } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
 
 const urlsToRedirect = ["medium.com", "javascript.plainenglish.io"];
+const kindleHelperUrl = process.env.KINDLE_HELPER_URL;
+
+// Styling similar to Tailwind CSS "prose"
+const contentStyling = /* css */ `
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.75;
+        max-width: 65ch;
+        margin: 0 auto;
+        padding: 2rem;
+        background: white;
+        color: rgb(55, 65, 81);
+      }
+
+      article > * + * {
+        margin-top: 1.5em;
+      }
+
+      h1, h2, h3, h4 {
+        color: rgb(17, 24, 39);
+        font-weight: 700;
+        line-height: 1.1;
+      }
+
+      h1 {
+        font-size: 2.25em;
+        margin-top: 0;
+        margin-bottom: 0.8888889em;
+      }
+
+      h2 {
+        font-size: 1.5em;
+        margin-top: 2em;
+        margin-bottom: 1em;
+      }
+
+      h3 {
+        font-size: 1.25em;
+        margin-top: 1.6em;
+        margin-bottom: 0.6em;
+      }
+
+      h4 {
+        font-size: 1.125em;
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+      }
+
+      p {
+        margin-top: 1.25em;
+        margin-bottom: 1.25em;
+        line-height: 1.75;
+      }
+
+      img {
+        max-width: 100%;
+        height: auto;
+        margin: 2em auto;
+        display: block;
+        border-radius: 0.375rem;
+      }
+
+      a {
+        color: rgb(37, 99, 235);
+        text-decoration: underline;
+        font-weight: 500;
+      }
+
+      ul, ol {
+        margin-top: 1.25em;
+        margin-bottom: 1.25em;
+        padding-left: 1.625em;
+      }
+
+      li {
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+        padding-left: 0.375em;
+      }
+
+      ul > li {
+        list-style-type: disc;
+      }
+
+      ol > li {
+        list-style-type: decimal;
+      }
+
+      blockquote {
+        font-weight: 500;
+        font-style: italic;
+        color: rgb(55, 65, 81);
+        border-left: 0.25rem solid rgb(209, 213, 219);
+        margin-top: 1.6em;
+        margin-bottom: 1.6em;
+        padding-left: 1em;
+      }
+
+      blockquote p {
+        margin-top: 0.8em;
+        margin-bottom: 0.8em;
+      }
+
+      code {
+        color: rgb(31, 41, 55);
+        font-weight: 600;
+        font-size: 0.875em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        background-color: rgb(243, 244, 246);
+        padding: 0.2em 0.4em;
+        border-radius: 0.375rem;
+      }
+
+      pre {
+        color: rgb(31, 41, 55);
+        background-color: rgb(243, 244, 246);
+        overflow-x: auto;
+        font-size: 0.875em;
+        line-height: 1.7142857;
+        margin-top: 1.7142857em;
+        margin-bottom: 1.7142857em;
+        padding: 0.8571429em 1.1428571em;
+        border-radius: 0.375rem;
+      }
+
+      pre code {
+        background-color: transparent;
+        border-width: 0;
+        border-radius: 0;
+        padding: 0;
+        font-weight: 400;
+        color: inherit;
+        font-size: inherit;
+        font-family: inherit;
+        line-height: inherit;
+      }
+
+      strong {
+        color: rgb(17, 24, 39);
+        font-weight: 600;
+      }
+
+      hr {
+        margin-top: 3em;
+        margin-bottom: 3em;
+        border: none;
+        border-top: 1px solid rgb(209, 213, 219);
+      }`;
 
 const constructUrl = (url: string) => {
+  if (!kindleHelperUrl) {
+    return url;
+  }
+
   for (const redirectUrl of urlsToRedirect) {
     if (url.includes(redirectUrl)) {
-      return `https://freedium.cfd/${url}`;
+      return `${kindleHelperUrl}/${url}`;
     }
   }
   return url;
@@ -34,10 +186,79 @@ const getPageTitle = async (page: Page): Promise<string> => {
 
 const formatFileNameSafe = (title: string): string => {
   return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-") // Replace special chars with hyphen
-    .replace(/^-+|-+$/g, "") // Remove leading/trailing hyphens
+    .replace(/[^a-zA-Z0-9\s]+/g, " ") // Replace special chars with space
+    .replace(/\s+/g, " ") // Replace multiple spaces with single space
+    .trim() // Remove leading/trailing spaces
     .substring(0, 100); // Limit length
+};
+
+const extractAndStyleContent = async (page: Page) => {
+  await page.evaluate(() => {
+    // Define elements to remove
+    const elementsToRemove = ["header", "nav", "footer", "aside", "form"];
+
+    // First remove navigation and fixed/sticky elements
+    const allElements = document.querySelectorAll("*");
+    allElements.forEach((element) => {
+      const style = window.getComputedStyle(element);
+      const elementName = element.tagName.toLowerCase();
+      const isElementToRemove = elementsToRemove.includes(elementName);
+      const isFixedOrSticky =
+        style.position === "fixed" || style.position === "sticky";
+      if (isElementToRemove || isFixedOrSticky) {
+        element.remove();
+      }
+    });
+
+    // Handle lazy-loaded images before extracting content
+    const images = document.querySelectorAll("img");
+    images.forEach((img) => {
+      if (img.loading === "lazy") {
+        img.loading = "eager";
+      }
+      // Handle common data-src patterns
+      const dataSrc =
+        img.getAttribute("data-src") ??
+        img.getAttribute("data-original") ??
+        img.getAttribute("data-lazy-src");
+      if (dataSrc) {
+        img.src = dataSrc;
+      }
+    });
+
+    // Create a new container for our extracted content
+    const articleContainer = document.createElement("article");
+    articleContainer.id = "kindle-content";
+
+    // Select all relevant content elements
+    const contentElements = document.querySelectorAll(
+      "h1, h2, h3, h4, h5, h6, p, strong, em, i, b, a, img, ul, ol, li, blockquote, code, pre",
+    );
+
+    // Clone and append each element to our new container
+    contentElements.forEach((element) => {
+      const clone = element.cloneNode(true) as HTMLElement;
+
+      // Strip all existing styles and classes
+      clone.removeAttribute("class");
+      clone.removeAttribute("style");
+      clone.removeAttribute("id");
+
+      articleContainer.appendChild(clone);
+    });
+
+    // Clear the body and append our new container
+    document.body.innerHTML = "";
+    document.body.appendChild(articleContainer);
+
+    // Add our custom styling
+    const style = document.createElement("style");
+    style.textContent = contentStyling;
+    document.head.appendChild(style);
+  });
+
+  // Add a longer delay to ensure images are loaded
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 };
 
 export const kindleRouter = createTRPCRouter({
@@ -99,52 +320,11 @@ export const kindleRouter = createTRPCRouter({
           timeout: 30000,
         });
 
-        // Remove unwanted elements before generating PDF
-        await page.evaluate(() => {
-          // Remove elements with fixed or sticky positioning
-          const removeElementsByPosition = () => {
-            const allElements = document.querySelectorAll("*");
-            allElements.forEach((element) => {
-              const style = window.getComputedStyle(element);
-              if (style.position === "fixed" || style.position === "sticky") {
-                element.remove();
-              }
-            });
-          };
+        // Replace the removeUnwantedElements call with our new function
+        await extractAndStyleContent(page);
 
-          // Run it multiple times to catch any dynamically added elements
-          removeElementsByPosition();
-          setTimeout(removeElementsByPosition, 1000);
-
-          // Add custom CSS to ensure content is properly formatted
-          const style = document.createElement("style");
-          style.textContent = `
-            body {
-              padding: 20px !important;
-              margin: 0 !important;
-              max-width: 100% !important;
-              position: relative !important; /* Prevent fixed positioning */
-              color: black !important;
-            }
-            article {
-              max-width: 100% !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              color: black !important;
-              background-color: white !important;
-            }
-            .main-content {
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            /* Prevent new fixed/sticky elements */
-            * {
-              position: relative !important;
-              z-index: auto !important;
-            }
-          `;
-          document.head.appendChild(style);
-        });
+        // Add a small delay to ensure images are loaded
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
         // Wait for content to load
         await page.waitForFunction(
@@ -211,8 +391,8 @@ export const kindleRouter = createTRPCRouter({
           [
             `From: ${ctx.session.user.email}`,
             `To: ${kindleEmail}`,
+            `Subject: ${pageTitle}`,
             'Content-Type: multipart/mixed; boundary="boundary"',
-            `X-Doc-Title: ${pageTitle}`,
             "",
             "--boundary",
             "Content-Type: text/plain",

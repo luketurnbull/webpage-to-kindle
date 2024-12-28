@@ -11,5 +11,5 @@ This is a [T3 Stack](https://create.t3.gg/) project. It is a simple web applicat
 ## TODO
 
 - [x] Deploy to Vercel
-- [ ] Bomb initial T3 Code
-- [ ] Add shadcn/ui to the project
+- [x] Bomb initial T3 Code
+- [x] Add shadcn/ui to the project
