@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { google } from "googleapis";
-import puppeteer, { type Page } from "puppeteer";
+import puppeteer, { Browser, type Page } from "puppeteer";
 import { TRPCError } from "@trpc/server";
 import { accounts } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
@@ -199,6 +199,7 @@ const getPageTitle = async (page: Page): Promise<string> => {
     // Final fallback to URL
     return window.location.pathname.split("/").pop() ?? "article";
   });
+
   return title;
 };
 
@@ -210,7 +211,40 @@ const formatFileNameSafe = (title: string): string => {
     .substring(0, 100); // Limit length
 };
 
-const extractAndStyleContent = async (page: Page) => {
+const createPage = async (browser: Browser, url: string) => {
+  const page = await browser.newPage();
+
+  // Set a realistic viewport
+  await page.setViewport({
+    width: 1280,
+    height: 720,
+    deviceScaleFactor: 1,
+  });
+
+  // Set a realistic user agent
+  await page.setUserAgent(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  );
+
+  // Add additional headers
+  await page.setExtraHTTPHeaders({
+    "Accept-Language": "en-US,en;q=0.9",
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    Connection: "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+  });
+
+  // Navigate with extended timeout and wait conditions
+  await page.goto(url, {
+    waitUntil: "networkidle0",
+    timeout: 30000,
+  });
+
+  return page;
+};
+
+const waitForImagesToLoad = async (page: Page) => {
   // First handle images and wait for them to load
   await page.evaluate(() => {
     const images = document.querySelectorAll("img");
@@ -229,7 +263,6 @@ const extractAndStyleContent = async (page: Page) => {
     });
   });
 
-  // Wait for all images to load
   await page.evaluate(() => {
     return Promise.all(
       Array.from(document.images)
@@ -243,7 +276,9 @@ const extractAndStyleContent = async (page: Page) => {
         ),
     );
   });
+};
 
+const extractAndStyleContent = async (page: Page) => {
   // Now extract and style content
   await page.evaluate((contentStyling) => {
     return new Promise((resolve) => {
@@ -333,7 +368,14 @@ export const kindleRouter = createTRPCRouter({
         const url = constructUrl(input.url);
         const kindleEmail = ctx.session.user.kindleEmail;
 
-        // Launch browser with stealth mode and additional configurations
+        console.log(`
+          ------------------------------
+          Sending ${url} to ${kindleEmail} as a PDF
+          ------------------------------
+        `);
+
+        console.log("Launching browser...");
+
         const browser = await puppeteer.launch({
           headless: true,
           args: [
@@ -348,51 +390,44 @@ export const kindleRouter = createTRPCRouter({
           ],
         });
 
-        const page = await browser.newPage();
+        console.log("Browser launched");
+        console.log("Opening page...");
 
-        // Set a realistic viewport
-        await page.setViewport({
-          width: 1280,
-          height: 720,
-          deviceScaleFactor: 1,
-        });
+        // Open page
+        const page = await createPage(browser, url);
 
-        // Set a realistic user agent
-        await page.setUserAgent(
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        );
+        console.log("Page opened");
+        console.log("Waiting for images to load...");
 
-        // Add additional headers
-        await page.setExtraHTTPHeaders({
-          "Accept-Language": "en-US,en;q=0.9",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-          Connection: "keep-alive",
-          "Upgrade-Insecure-Requests": "1",
-        });
+        // Wait for images to load
+        await waitForImagesToLoad(page);
 
-        // Navigate with extended timeout and wait conditions
-        await page.goto(url, {
-          waitUntil: "networkidle0",
-          timeout: 30000,
-        });
+        console.log("Images loaded");
+        console.log("Extracting and styling content...");
 
         // Replace the removeUnwantedElements call with our new function
         await extractAndStyleContent(page);
 
-        // Wait for content to load
-        await page.waitForFunction(
-          () => {
-            const body = document.body;
-            const content = body.textContent ?? "";
-            return content.length > 500;
-          },
-          { timeout: 10000 },
-        );
+        console.log("Content extracted and styled");
+
+        // // Wait for content to load
+        // await page.waitForFunction(
+        //   () => {
+        //     const body = document.body;
+        //     const content = body.textContent ?? "";
+        //     return content.length > 500;
+        //   },
+        //   { timeout: 10000 },
+        // );
+
+        console.log("Getting page title and creating safe file name...");
 
         // After page.goto and before PDF generation
         const pageTitle = await getPageTitle(page);
         const safeFileName = `${formatFileNameSafe(pageTitle)}.pdf`;
+
+        console.log("Page title and safe file name created");
+        console.log("Converting to PDF...");
 
         // Convert to PDF with full content
         const pdf = await page.pdf({
@@ -408,7 +443,13 @@ export const kindleRouter = createTRPCRouter({
           preferCSSPageSize: true,
         });
 
+        console.log("PDF created");
+        console.log("Closing browser...");
+
         await browser.close();
+
+        console.log("Browser closed");
+        console.log("Sending email...");
 
         const auth = new google.auth.OAuth2(
           process.env.GOOGLE_CLIENT_ID,
