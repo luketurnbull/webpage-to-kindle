@@ -6,18 +6,22 @@ import { Button } from "~/components/ui/button";
 export function SendToKindle() {
   const [url, setUrl] = useState("");
   const [pdfBlob, setPdfBlob] = useState<string | null>(null);
-  const sendToKindle = api.kindle.sendWebpage.useMutation({
-    onSuccess: (data) => {
-      setUrl("");
-      if (data.pdf) {
-        // Convert base64 to blob and create URL
-        const bytes = Uint8Array.from(atob(data.pdf), (c) => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: "application/pdf" });
-        const blobUrl = URL.createObjectURL(blob);
-        setPdfBlob(blobUrl);
-      }
-    },
-  });
+  const { mutate, isPending, isError, error } =
+    api.kindle.sendWebpage.useMutation({
+      onSuccess: (data) => {
+        setUrl("");
+        if (data.pdf) {
+          // Convert base64 to blob and create URL
+          const bytes = Uint8Array.from(atob(data.pdf), (c) => c.charCodeAt(0));
+          const blob = new Blob([bytes], { type: "application/pdf" });
+          const blobUrl = URL.createObjectURL(blob);
+          setPdfBlob(blobUrl);
+        }
+      },
+      onError: (error) => {
+        console.error(error);
+      },
+    });
 
   // Clean up blob URL when component unmounts
   useEffect(() => {
@@ -30,7 +34,7 @@ export function SendToKindle() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    sendToKindle.mutate({ url });
+    mutate({ url });
   };
 
   return (
@@ -45,9 +49,11 @@ export function SendToKindle() {
           className="rounded-md px-4 py-2 text-black"
           required
         />
-        <Button type="submit" disabled={sendToKindle.isPending}>
-          {sendToKindle.isPending ? "Sending..." : "Send to Kindle"}
+        <Button type="submit" disabled={isPending}>
+          {isPending ? "Sending..." : "Send to Kindle"}
         </Button>
+        {isError && <p className="text-red-500">Error sending to Kindle</p>}
+        {error && <p className="text-red-500">{error.message}</p>}
       </form>
       {pdfBlob && (
         <a href={pdfBlob} target="_blank" rel="noopener noreferrer">
