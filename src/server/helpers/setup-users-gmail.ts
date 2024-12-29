@@ -1,5 +1,3 @@
-"use server";
-
 import { google } from "googleapis";
 import { accounts } from "~/server/db/schema";
 import { eq } from "drizzle-orm";

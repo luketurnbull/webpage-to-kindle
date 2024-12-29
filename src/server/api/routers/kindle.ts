@@ -1,45 +1,16 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
-import { setupUsersGmail } from "~/lib/setup-users-gmail";
-import { constructUrl } from "~/lib/construct-url";
-
-const formatFileNameSafe = (title: string): string => {
-  return title
-    .replace(/[^a-zA-Z0-9\s]+/g, " ") // Replace special chars with space
-    .replace(/\s+/g, " ") // Replace multiple spaces with single space
-    .trim() // Remove leading/trailing spaces
-    .substring(0, 100); // Limit length
-};
-
-const fetchAndParse = async (url: string) => {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch URL: ${response.statusText}`);
-  }
-
-  const html = await response.text();
-
-  // Create the final HTML
-  const finalHtml = `${html}`;
-
-  return {
-    html: finalHtml,
-    title: "article",
-  };
-};
+import { setupUsersGmail } from "~/server/helpers/setup-users-gmail";
+import { constructUrl } from "~/server/helpers/construct-url";
+import { fetchDocument } from "~/server/helpers/fetch-document";
+import { constructFileName } from "~/server/helpers/construct-file-name";
+import { constructPdf } from "~/server/helpers/construct-pdf";
 
 const constructEmailBody = (
   pageTitle: string,
   pdfBase64: string,
-  safeFileName: string,
+  fileName: string,
   kindleEmail: string,
   userEmail: string,
 ) => {
@@ -53,12 +24,12 @@ const constructEmailBody = (
       "--boundary",
       "Content-Type: text/plain",
       "",
-      "Sent from Send to Kindle",
+      "Sent from Webpage to Kindle",
       "",
       "--boundary",
-      `Content-Type: application/pdf; name="${safeFileName}"`,
+      `Content-Type: application/pdf; name="${fileName}"`,
       "Content-Transfer-Encoding: base64",
-      `Content-Disposition: attachment; filename="${safeFileName}"`,
+      `Content-Disposition: attachment; filename="${fileName}"`,
       "",
       pdfBase64,
       "--boundary--",
@@ -91,27 +62,62 @@ export const kindleRouter = createTRPCRouter({
           });
         }
 
-        const url = constructUrl(input.url);
-        const { kindleEmail, email: userEmail } = ctx.session.user;
-
         console.log(`
           ------------------------------
-          Sending email to ${kindleEmail} from ${userEmail}
-          Parsing HTML from ${url}
+          Step 1: Checking URL from ${input.url}
           ------------------------------
         `);
 
-        const { html, title } = await fetchAndParse(url);
-        const safeFileName = formatFileNameSafe(title) + ".pdf";
+        const url = constructUrl(input.url);
+
+        console.log(`
+          ------------------------------
+          Step 2: Fetching HTML from ${url}
+          ------------------------------
+        `);
+
+        const response = await fetchDocument(url);
+        const html = await response.text();
+
+        console.log(`
+          ------------------------------
+          Step 3: Constructing file name from HTML response
+          ------------------------------
+        `);
+
+        const title = constructFileName(html);
+        const fileName = `${title}.pdf`;
+
+        console.log(`
+          ------------------------------
+          Step 4: Constructing PDF from HTML
+          ------------------------------
+        `);
+
+        const pdf = await constructPdf(html);
+
+        console.log(`
+          ------------------------------
+          Step 5: Authorizing Gmail API
+          ------------------------------
+        `);
 
         const gmail = await setupUsersGmail(ctx.session.user.id, ctx.db);
+
+        const { kindleEmail, email: userEmail } = ctx.session.user;
         const raw = constructEmailBody(
           title,
-          "",
-          safeFileName,
+          pdf.toString("base64"),
+          fileName,
           kindleEmail,
           userEmail,
         );
+
+        console.log(`
+          ------------------------------
+          Step 6: Sending email to ${kindleEmail} from ${userEmail}
+          ------------------------------
+        `);
 
         const res = await gmail.users.messages.send({
           userId: "me",
@@ -129,7 +135,7 @@ export const kindleRouter = createTRPCRouter({
         return {
           success: true,
           body: res.data,
-          pdf: "",
+          pdf: pdf.toString("base64"),
         };
       } catch (error) {
         console.error(error);

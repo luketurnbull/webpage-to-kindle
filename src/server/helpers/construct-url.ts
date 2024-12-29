@@ -1,5 +1,3 @@
-"use server";
-
 const URLS_TO_REDIRECT_TO_PROXY = [
   "medium.com",
   "javascript.plainenglish.io",
