@@ -7,6 +7,8 @@ import { fetchDocument } from "~/server/helpers/fetch-document";
 import { constructFileName } from "~/server/helpers/construct-file-name";
 import { constructPdf } from "~/server/helpers/construct-pdf";
 import { constructEmailBody } from "~/server/helpers/construct-email-body";
+import { cleanHtml } from "~/server/helpers/clean-html";
+
 export const kindleRouter = createTRPCRouter({
   sendWebpage: protectedProcedure
     .input(z.object({ url: z.string().url() }))
@@ -42,6 +44,7 @@ export const kindleRouter = createTRPCRouter({
 
         const response = await fetchDocument(url);
         const html = await response.text();
+        const content = cleanHtml(html, url);
 
         console.log(`
           ------------------------------
@@ -49,7 +52,7 @@ export const kindleRouter = createTRPCRouter({
           ------------------------------
         `);
 
-        const title = constructFileName(html);
+        const title = constructFileName(content);
         const fileName = `${title}.pdf`;
 
         console.log(`
@@ -58,7 +61,7 @@ export const kindleRouter = createTRPCRouter({
           ------------------------------
         `);
 
-        const pdf = await constructPdf(html);
+        const pdf = await constructPdf(content);
 
         console.log(`
           ------------------------------
