@@ -6,43 +6,7 @@ import { constructUrl } from "~/server/helpers/construct-url";
 import { fetchDocument } from "~/server/helpers/fetch-document";
 import { constructFileName } from "~/server/helpers/construct-file-name";
 import { constructPdf } from "~/server/helpers/construct-pdf";
-
-const constructEmailBody = (
-  pageTitle: string,
-  pdfBase64: string,
-  fileName: string,
-  kindleEmail: string,
-  userEmail: string,
-) => {
-  const raw = Buffer.from(
-    [
-      `From: ${userEmail}`,
-      `To: ${kindleEmail}`,
-      `Subject: ${pageTitle}`,
-      'Content-Type: multipart/mixed; boundary="boundary"',
-      "",
-      "--boundary",
-      "Content-Type: text/plain",
-      "",
-      "Sent from Webpage to Kindle",
-      "",
-      "--boundary",
-      `Content-Type: application/pdf; name="${fileName}"`,
-      "Content-Transfer-Encoding: base64",
-      `Content-Disposition: attachment; filename="${fileName}"`,
-      "",
-      pdfBase64,
-      "--boundary--",
-    ].join("\n"),
-  )
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-
-  return raw;
-};
-
+import { constructEmailBody } from "~/server/helpers/construct-email-body";
 export const kindleRouter = createTRPCRouter({
   sendWebpage: protectedProcedure
     .input(z.object({ url: z.string().url() }))
@@ -107,7 +71,7 @@ export const kindleRouter = createTRPCRouter({
         const { kindleEmail, email: userEmail } = ctx.session.user;
         const raw = constructEmailBody(
           title,
-          pdf.toString("base64"),
+          pdf,
           fileName,
           kindleEmail,
           userEmail,
@@ -135,7 +99,7 @@ export const kindleRouter = createTRPCRouter({
         return {
           success: true,
           body: res.data,
-          pdf: pdf.toString("base64"),
+          pdf,
         };
       } catch (error) {
         console.error(error);

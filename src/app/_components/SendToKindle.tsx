@@ -11,9 +11,17 @@ export function SendToKindle() {
       onSuccess: (data) => {
         setUrl("");
         if (data.pdf) {
-          // Convert base64 to blob and create URL
-          const bytes = Uint8Array.from(atob(data.pdf), (c) => c.charCodeAt(0));
-          const blob = new Blob([bytes], { type: "application/pdf" });
+          let blob;
+          if (typeof data.pdf === "string") {
+            // Handle base64 string
+            const bytes = Uint8Array.from(atob(data.pdf), (c) =>
+              c.charCodeAt(0),
+            );
+            blob = new Blob([bytes], { type: "application/pdf" });
+          } else {
+            // Handle Uint8Array
+            blob = new Blob([data.pdf], { type: "application/pdf" });
+          }
           const blobUrl = URL.createObjectURL(blob);
           setPdfBlob(blobUrl);
         }
